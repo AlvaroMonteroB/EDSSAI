@@ -2,7 +2,7 @@ from ultralytics import YOLO
 import cv2
 
 # Cargar el modelo YOLOv8 preentrenado
-model = YOLO('yolov8n.pt')  # Cambia 'yolov8n.pt' por otro modelo si lo necesitas
+model = YOLO('yolov5s.pt')  # Cambia 'yolov8n.pt' por otro modelo si lo necesitas
 
 # Inicializar la cámara web
 cap = cv2.VideoCapture(0)  # Usa 0 para la cámara web por defecto; cambia si tienes varias cámaras
