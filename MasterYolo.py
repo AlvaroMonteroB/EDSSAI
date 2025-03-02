@@ -10,6 +10,8 @@ from PIL import ImageTk
 import tkinter as tk
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from tkinter import ttk
+import subprocess
+import cv2
 # Para solucionar problemas de compatibilidad entre sistemas operativos
 temp = pathlib.PosixPath
 pathlib.PosixPath = pathlib.WindowsPath
@@ -126,9 +128,41 @@ def extraer_bounding_boxes(results, img):
 
     return cropped_images
 
+def capture_video(frame_list):
+    VIDEO_PIPE = "libcamera-vid -t 0 --inline --flush --width 640 --height 480 --framerate 30 --codec mjpeg -o -"
+    cap_process = subprocess.Popen(VIDEO_PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
 
+    print("Presiona cualquier tecla para tomar una foto. Presiona 'q' para salir.")
 
+    buffer = bytearray()
+    save_path = "capture.jpg"  # Ruta por defecto, puedes cambiarla
 
+    while True:
+        # Leer los datos del flujo MJPEG en pequeños fragmentos
+        buffer.extend(cap_process.stdout.read(4096))
+        start = buffer.find(b'\xff\xd8')  # Inicio de imagen JPEG
+        end = buffer.find(b'\xff\xd9')  # Fin de imagen JPEG
+        
+        if start != -1 and end != -1 and start < end:
+            jpg_data = buffer[start:end+2]  # Extraer datos JPEG
+            buffer = buffer[end+2:]  # Limpiar buffer
+            
+            # Decodificar la imagen
+            frame = cv2.imdecode(np.frombuffer(jpg_data, dtype=np.uint8), cv2.IMREAD_COLOR)
+            
+            if frame is not None:
+                cv2.imshow("Raspberry Pi Camera", frame)
+
+        key = cv2.waitKey(1) & 0xFF
+        if key != 255:  # Cualquier tecla presionada
+            if key == ord('q'):
+                break
+            frame_list.append(frame)
+
+    cap_process.terminate()
+    cv2.destroyAllWindows()
+
+    
 
 # Función para graficar el seno dentro de una ventana de tkinter
 def graficar_seno_tkinter():
@@ -322,7 +356,8 @@ class_colors = {
 img_path = 'yp1.jpg' 
 
 img = cargar_img(img_path)
-
+frame_list=[]
+#capture_video(frame_list)#Captura de video
 
 
 resultado_1er_Modelo = evaluar_rostro(img)
