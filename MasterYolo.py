@@ -6,9 +6,11 @@ import pathlib
 from random import randint
 from PIL import Image, ImageDraw, ImageFont
 
+#/home/flakis/Desktop/EDSSAI/test/capture.jpg
+
 # Para solucionar problemas de compatibilidad entre sistemas operativos
-temp = pathlib.PosixPath
-pathlib.PosixPath = pathlib.WindowsPath
+#temp = pathlib.PosixPath
+#pathlib.PosixPath = pathlib.WindowsPath
 
 def cargar_img(path):
     # Cargar la imagen con OpenCV para mostrarla primero
@@ -193,9 +195,10 @@ class_colors = {
     3: "yellow",
     4: "purple"
 }
-
+#/home/flakis/Desktop/EDSSAI/test/capture.jpg
 
 img_path = 'yp1.jpg' 
+img_path = '/home/flakis/Desktop/EDSSAI/test/capture.jpg'
 img = cargar_img(img_path)
 resultado_1er_Modelo = evaluar_rostro(img)
 cropped_images = extraer_bounding_boxes(resultado_1er_Modelo, img)
