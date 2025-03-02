@@ -4,7 +4,7 @@ import time
 import numpy as np
 
 # Configurar el comando para capturar video con libcamera-vid y leerlo con OpenCV
-VIDEO_PIPE = "libcamera-vid -t 0 --inline --flush --width 640 --height 480 --framerate 30 --codec mjpeg -o -"
+VIDEO_PIPE = "libcamera-vid -t 0 --inline --flush --width 1920 --height 1080 --framerate 30 --codec mjpeg -o -"
 
 def capture_photo(cap_process, save_path):
     """Detiene el proceso de video, captura una foto y lo reinicia."""
@@ -12,8 +12,11 @@ def capture_photo(cap_process, save_path):
     cap_process.wait()  # Esperar a que el proceso termine completamente
     
     capture_cmd = f"libcamera-still -o {save_path} -t 100 --nopreview"
-    subprocess.run(capture_cmd.split(), check=True)
-    print(f"Foto guardada en '{save_path}'")
+    try:
+        result = subprocess.run(capture_cmd.split(), check=True, capture_output=True, text=True)
+        print(f"Foto guardada en '{save_path}'")
+    except subprocess.CalledProcessError as e:
+        print(f"Error al capturar la foto: {e.stderr}")
     
     return subprocess.Popen(VIDEO_PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
 
@@ -24,7 +27,7 @@ def main():
     print("Presiona cualquier tecla para tomar una foto. Presiona 'q' para salir.")
 
     buffer = bytearray()
-    save_path = "capture.jpg"  # Ruta por defecto, puedes cambiarla
+    save_path = "/home/flakis/Desktop/EDSSAI/test/capture.jpg"  # Ruta por defecto, puedes cambiarla
 
     while True:
         # Leer los datos del flujo MJPEG en pequeños fragmentos
