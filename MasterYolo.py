@@ -1,40 +1,33 @@
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
-import cv2
 import pathlib
 from random import randint
 from PIL import Image, ImageDraw, ImageFont
 
-#/home/flakis/Desktop/EDSSAI/test/capture.jpg
-
 # Para solucionar problemas de compatibilidad entre sistemas operativos
-#temp = pathlib.PosixPath
-#pathlib.PosixPath = pathlib.WindowsPath
+temp = pathlib.PosixPath
+pathlib.PosixPath = pathlib.WindowsPath
 
 def cargar_img(path):
-    # Cargar la imagen con OpenCV para mostrarla primero
-    img_cv2 = cv2.imread(path)
-    # Mostrar la imagen con OpenCV
-    cv2.imshow('Imagen Original', img_cv2)
-    cv2.waitKey(0)  # Espera hasta que se cierre la ventana
-    cv2.destroyAllWindows()  # Cierra la ventana
+    img_pil = Image.open(path)
     
-    # Convertir la imagen de BGR (OpenCV) a RGB (PIL)
-    img_rgb = cv2.cvtColor(img_cv2, cv2.COLOR_BGR2RGB)
-    img_pil = Image.fromarray(img_rgb)
+    plt.imshow(img_pil)
+    plt.title("Imagen Original")
+    plt.axis("off")
+    plt.show()
+    
     return img_pil
 
 def cargar_modelo(modo):
     if modo == "Face":
-        model = torch.hub.load('ultralytics/yolov5', 'custom', path='/home/flakis/Desktop/EDSSAI/models/best_FaceV2.pt', force_reload=True)
+        model = torch.hub.load('ultralytics/yolov5', 'custom', path='best_FaceV2.pt', force_reload=True)
     else:
-        model = torch.hub.load('ultralytics/yolov5', 'custom', path='/home/flakis/Desktop/EDSSAI/models/bestPupilV7.pt', force_reload=True)
+        model = torch.hub.load('ultralytics/yolov5', 'custom', path='bestPupilV7.pt', force_reload=True)
     return model
 
 def evaluar_rostro(img):
     modo = "Face"
-    print("Cargar modelo face")
     model = cargar_modelo(modo)
     # Configurar el modelo para correr en CPU o GPU (si está disponible)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -56,7 +49,6 @@ def evaluar_pupila(img):
    
     detections = results.xyxy[0].cpu().numpy()  # Convertir a numpy array
     print("Bounding boxes detectadas:")
-
 
     for i, (x1, y1, x2, y2, conf, cls) in enumerate(detections):
         print(f"Detección {i + 1}:")
@@ -89,22 +81,28 @@ def extraer_bounding_boxes(results, img):
 
     return cropped_images
 
+import numpy as np
 
 def plotear_ojos(cropped_images):
-    if cropped_images:
-        for i, cropped in enumerate(cropped_images):
-            img_array = np.array(cropped)
-            print(f"Mostrando imagen {i+1} con forma: {img_array.shape}")
-            # Convertir la imagen de PIL (que tiene formato RGB) a BGR para OpenCV
-            img_bgr = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
-            # Mostrar la imagen con OpenCV
-            cv2.imshow(f'Ojo {i+1}', img_bgr)
-
-        # Esperar una tecla para cerrar las ventanas
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
-    else:
+    if not cropped_images:
         print("No se detectaron objetos en la imagen.")
+        return
+    
+    print("Ploteando")
+    num_images = len(cropped_images)
+    
+    fig, axes = plt.subplots(1, num_images, figsize=(10, 5))
+    
+    if num_images == 1:
+        axes = [axes]  # Convertir a lista para iterar
+    
+    for i, cropped in enumerate(cropped_images):
+        img_np = np.array(cropped)  # Convertir PIL a NumPy
+        axes[i].imshow(img_np)
+        axes[i].set_title(f'Ojo {i+1}')
+        axes[i].axis("off")
+    
+    plt.show()
 
 
 def procesar_pupilas(resultado, img):
@@ -135,21 +133,15 @@ def procesar_pupilas(resultado, img):
     # Convertir la imagen recortada a escala de grises
     cropped_img_gray = cropped_img.convert("L")
 
-    # Convertir la imagen de PIL a un array de NumPy para OpenCV
-    cropped_img_np = np.array(cropped_img_gray)
-
-    ecualizada = cv2.equalizeHist(cropped_img_np)
-
-    cv2.imshow("Pupila Detectada", ecualizada)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
+    # Mostrar la imagen recortada en escala de grises
+    plt.imshow(cropped_img_gray, cmap='gray')
+    plt.title("Pupila Detectada")
+    plt.axis("off")
+    plt.show()
 
     return cropped_img_gray, cropped_img
 
-
-
 def dibujar_diferencia(img, resultado, class_colors, scale_factor=4):
-
     draw = ImageDraw.Draw(img)
     
     # Obtener detecciones
@@ -170,24 +162,15 @@ def dibujar_diferencia(img, resultado, class_colors, scale_factor=4):
         class_text = f"Clase {int(cls)}"
         draw.text((center_x + 5, center_y + 5), class_text, fill=color)
     
-    
-    # Convertir la imagen de PIL a un array de NumPy para OpenCV
-    img_np = np.array(img)
-    img_bgr = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
-    # Determinar si la imagen es en color o escala de grises
-    if len(img_bgr.shape) == 3:  # Imagen en color
-        height, width, _ = img_bgr.shape
-    else:  # Imagen en escala de grises
-        height, width = img_bgr.shape
-
     # Aumentar el tamaño de la imagen antes de mostrarla
-    img_resized = cv2.resize(img_bgr, (width * scale_factor, height * scale_factor), interpolation=cv2.INTER_LINEAR)
+    width, height = img.size
+    img_resized = img.resize((width * scale_factor, height * scale_factor), Image.Resampling.LANCZOS)
 
-    # Mostrar la imagen con OpenCV
-    cv2.imshow("Pupila Detectada", img_resized)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
-
+    # Mostrar la imagen con Matplotlib
+    plt.imshow(img_resized)
+    plt.title("Pupila Detectada")
+    plt.axis("off")
+    plt.show()
 
 class_colors = {
     0: "red",
@@ -196,18 +179,13 @@ class_colors = {
     3: "yellow",
     4: "purple"
 }
-#/home/flakis/Desktop/EDSSAI/test/capture.jpg
 
 img_path = 'yp1.jpg' 
-img_path = '/home/flakis/Desktop/EDSSAI/test/capture.jpg'
 img = cargar_img(img_path)
-print("Imagen cargada")
-print("Evaluar rostro inicia")
 resultado_1er_Modelo = evaluar_rostro(img)
-print("Evaluar modelo termina")
 cropped_images = extraer_bounding_boxes(resultado_1er_Modelo, img)
 plotear_ojos(cropped_images)
 pupila, pupila_color = procesar_pupilas(resultado_1er_Modelo, img)
 resultado_2do_Modelo = evaluar_pupila(pupila)
 
-dibujar_diferencia(pupila_color, resultado_2do_Modelo,class_colors)
+dibujar_diferencia(pupila_color, resultado_2do_Modelo, class_colors)
