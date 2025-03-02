@@ -158,7 +158,8 @@ def capture_video(frame_list):
             if key == ord('q'):
                 break
             frame_list.append(frame)
-
+        if len(frame_list)==9:
+            break
     cap_process.terminate()
     cv2.destroyAllWindows()
 
@@ -358,7 +359,17 @@ img_path = 'yp1.jpg'
 img = cargar_img(img_path)
 frame_list=[]
 #capture_video(frame_list)#Captura de video
+"""
+result_list=[]
+for frame in frame_list:
+    face_eval=evaluar_rostro(frame)
+    pupila, pupila_color = procesar_pupilas(resultado_1er_Modelo, img)
+    resultado_2do_Modelo = evaluar_pupila(pupila)
+    result_list.append(deepcopy(resultado_2do_Modelo))
+    dibujar diferencias en un plot
 
+
+"""
 
 resultado_1er_Modelo = evaluar_rostro(img)
 
