@@ -27,13 +27,14 @@ def cargar_img(path):
 
 def cargar_modelo(modo):
     if modo == "Face":
-        model = torch.hub.load('ultralytics/yolov5', 'custom', path='best_FaceV2.pt', force_reload=True)
+        model = torch.hub.load('ultralytics/yolov5', 'custom', path='/home/flakis/Desktop/EDSSAI/models/best_FaceV2.pt', force_reload=True)
     else:
-        model = torch.hub.load('ultralytics/yolov5', 'custom', path='bestPupilV7.pt', force_reload=True)
+        model = torch.hub.load('ultralytics/yolov5', 'custom', path='/home/flakis/Desktop/EDSSAI/models/bestPupilV7.pt', force_reload=True)
     return model
 
 def evaluar_rostro(img):
     modo = "Face"
+    print("Cargar modelo face")
     model = cargar_modelo(modo)
     # Configurar el modelo para correr en CPU o GPU (si está disponible)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -200,7 +201,10 @@ class_colors = {
 img_path = 'yp1.jpg' 
 img_path = '/home/flakis/Desktop/EDSSAI/test/capture.jpg'
 img = cargar_img(img_path)
+print("Imagen cargada")
+print("Evaluar rostro inicia")
 resultado_1er_Modelo = evaluar_rostro(img)
+print("Evaluar modelo termina")
 cropped_images = extraer_bounding_boxes(resultado_1er_Modelo, img)
 plotear_ojos(cropped_images)
 pupila, pupila_color = procesar_pupilas(resultado_1er_Modelo, img)
