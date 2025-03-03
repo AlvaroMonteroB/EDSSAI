@@ -13,8 +13,8 @@ from tkinter import ttk
 import subprocess
 import cv2
 # Para solucionar problemas de compatibilidad entre sistemas operativos
-temp = pathlib.PosixPath
-pathlib.PosixPath = pathlib.WindowsPath
+#temp = pathlib.PosixPath
+#pathlib.PosixPath = pathlib.WindowsPath
 
 def ploteo():
     plt.show()
@@ -68,9 +68,9 @@ def cargar_img(path):
 
 def cargar_modelo(modo):
     if modo == "Face":
-        model = torch.hub.load('ultralytics/yolov5', 'custom', path='best_FaceV2.pt', force_reload=True)
+        model = torch.hub.load('ultralytics/yolov5', 'custom', path='/home/flakis/Desktop/EDSSAI/models/best_FaceV2.pt', force_reload=True)
     else:
-        model = torch.hub.load('ultralytics/yolov5', 'custom', path='bestPupilV7.pt', force_reload=True)
+        model = torch.hub.load('ultralytics/yolov5', 'custom', path='/home/flakis/Desktop/EDSSAI/models/bestPupilV7.pt', force_reload=True)
     return model
 
 def evaluar_rostro(img):
@@ -157,7 +157,7 @@ def capture_video(frame_list):
         if key != 255:  # Cualquier tecla presionada
             if key == ord('q'):
                 break
-            frame_list.append(frame)
+            frame_list.append(Image.fromarray(frame))
         if len(frame_list)==9:
             break
     cap_process.terminate()
@@ -354,13 +354,22 @@ class_colors = {
     3: "yellow",
     4: "purple"
 }
-img_path = 'yp1.jpg' 
-
-img = cargar_img(img_path)
-frame_list=[]
-#capture_video(frame_list)#Captura de video
 """
+img_path = '/home/flakis/Desktop/EDSSAI/test/capture.jpg' 
+
+img = cargar_img(img_path)"""
+frame_list=[]
+#
+
+capture_video(frame_list)#Captura de video
 result_list=[]
+for frame in frame_list:
+    resultado_1er_Modelo = evaluar_rostro(frame)
+    cropped_image=extraer_bounding_boxes(resultado_1er_Modelo,frame)
+    mostrar_imagen_recortada(cropped_image)
+
+
+"""
 for frame in frame_list:
     face_eval=evaluar_rostro(frame)
     pupila, pupila_color = procesar_pupilas(resultado_1er_Modelo, img)
@@ -370,14 +379,15 @@ for frame in frame_list:
 
 
 """
-
+"""
 resultado_1er_Modelo = evaluar_rostro(img)
 
 cropped_images = extraer_bounding_boxes(resultado_1er_Modelo, img)
 graficar_seno_tkinter()
 
 # Llamada a la función para mostrar la imagen recortada
-mostrar_imagen_recortada(cropped_images)  
+mostrar_imagen_recortada(cropped_images) 
+"""
 """
 plotear_ojos(cropped_images)
 
