@@ -7,7 +7,7 @@ import random
 import string
 
 # Configurar el comando para capturar video con libcamera-vid y leerlo con OpenCV
-VIDEO_PIPE = "libcamera-vid -t 0 --inline --flush --width 640 --height 480 --framerate 30 --codec mjpeg -o -"
+VIDEO_PIPE = "libcamera-vid -t 0 --inline --flush --width 1920 --height 1080 --framerate 30 --codec mjpeg -o -"
 
 def capture_photo_from_buffer(frame, save_path):
     """Captura una foto directamente desde el frame actual y lo guarda en un archivo."""
@@ -62,7 +62,7 @@ def main():
             if key == ord('q'):
                 break
             aux=name_check(path)
-            save_path=path+aux+".jpg"
+            save_path=path+"/"+aux+".jpg"
             capture_photo_from_buffer(frame, save_path)  # Captura la foto desde el frame actual
 
     cap_process.terminate()
