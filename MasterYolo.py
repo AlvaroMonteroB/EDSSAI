@@ -12,6 +12,9 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from tkinter import ttk
 import subprocess
 import cv2
+import RPi.GPIO as GPIO
+import time
+
 # Para solucionar problemas de compatibilidad entre sistemas operativos
 #temp = pathlib.PosixPath
 #pathlib.PosixPath = pathlib.WindowsPath
@@ -137,6 +140,18 @@ def capture_video(frame_list):
     buffer = bytearray()
     save_path = "capture.jpg"  # Ruta por defecto, puedes cambiarla
 
+    LED_PINS = [17, 27, 22, 5, 6, 13, 19, 26, 21]  # Ajusta estos pines según tu conexión física
+
+    GPIO.setmode(GPIO.BCM)  # Usar numeración BCM
+    GPIO.setup(LED_PINS, GPIO.OUT)
+
+    # Apagar todos los LEDs al inicio
+    for pin in LED_PINS:
+        GPIO.output(pin, GPIO.LOW)
+    
+    
+    GPIO.output(LED_PINS[0], GPIO.HIGH)
+    led_index = 0
     while True:
         # Leer los datos del flujo MJPEG en pequeños fragmentos
         buffer.extend(cap_process.stdout.read(4096))
@@ -157,7 +172,13 @@ def capture_video(frame_list):
         if key != 255:  # Cualquier tecla presionada
             if key == ord('q'):
                 break
+            GPIO.output(LED_PINS[led_index], GPIO.LOW)
+            time.sleep(0.1)  # Pequeño retraso antes de capturar la imagen
             frame_list.append(Image.fromarray(frame))
+            led_index += 1
+            if led_index < len(LED_PINS):
+                GPIO.output(LED_PINS[led_index], GPIO.HIGH)
+                
         if len(frame_list)==9:
             break
     cap_process.terminate()
