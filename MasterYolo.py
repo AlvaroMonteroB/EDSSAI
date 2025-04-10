@@ -14,6 +14,7 @@ import subprocess
 import cv2
 import RPi.GPIO as GPIO
 import time
+import math
 
 # Para solucionar problemas de compatibilidad entre sistemas operativos
 #temp = pathlib.PosixPath
@@ -71,9 +72,9 @@ def cargar_img(path):
 
 def cargar_modelo(modo):
     if modo == "Face":
-        model = torch.hub.load('ultralytics/yolov5', 'custom', path='/home/flakis/Desktop/EDSSAI/models/best_FaceV2.pt', force_reload=True)
+        model = torch.hub.load('ultralytics/yolov5', 'custom', path='best_FaceV2.pt', force_reload=False)
     else:
-        model = torch.hub.load('ultralytics/yolov5', 'custom', path='/home/flakis/Desktop/EDSSAI/models/bestPupilV7.pt', force_reload=True)
+        model = torch.hub.load('ultralytics/yolov5', 'custom', path='EDSSAI150.pt', force_reload=False)
     return model
 
 def evaluar_rostro(img):
@@ -301,41 +302,67 @@ def mostrar_imagen_recortada(cropped_images):
 
 
 
-def procesar_pupilas(resultado, img):
-    detections = resultado.xyxy[0].cpu().numpy()  # Convertir a numpy array
-
-    if len(detections) == 0:
+def procesar_pupilas(cropped_images):
+    if not cropped_images:
         print("No se detectaron pupilas.")
         return None
+    root = tk._default_root  # Obtener la ventana principal de Tkinter si existe
+    if root is None:  
+        root = tk.Tk()  # Crear ventana principal solo si no existe
+        root.withdraw()  # Ocultar la ventana principal para que no sea visible
+    # Crear una ventana secundaria con Toplevel para mostrar las imágenes procesadas
+    top = tk.Toplevel()
+    top.title("Pupilas Procesadas")
 
-    # Tomar la primera detección
-    x1, y1, x2, y2, conf, cls = detections[1]
+    # Lista para mantener referencias de las imágenes
+    img_refs = []
+    processed_images = []  # Lista para almacenar las imágenes procesadas
 
-    # Obtener el tamaño de la imagen original
-    width, height = img.size  
+    # Procesar cada imagen recortada
+    for i, cropped_img in enumerate(cropped_images):
+        # Convertir la imagen recortada a formato OpenCV
+        cropped_img_cv = np.array(cropped_img)
+        cropped_img_cv = cv2.cvtColor(cropped_img_cv, cv2.COLOR_RGB2BGR)
 
-    margin = 5
-    x1, x2 = max(0, min(x1 + margin, width)), max(0, min(x2 - margin, width))
-    y1, y2 = max(0, min(y1 + margin, height)), max(0, min(y2 - margin, height))
+        # Aplicar desenfoque gaussiano
+        imagen_desenfocada = cv2.GaussianBlur(cropped_img_cv, (3, 3), 1.5)
 
-    # Validar que las coordenadas sean correctas (evitar x2 < x1 y y2 < y1)
-    if x2 <= x1 or y2 <= y1:
-        print("Error: Bounding box inválido después del ajuste.")
-        return None
+        # Convertir a espacio de color YCrCb para mejorar la luminancia
+        imagen_ycrcb = cv2.cvtColor(imagen_desenfocada, cv2.COLOR_BGR2YCrCb)
+        Y, Cr, Cb = cv2.split(imagen_ycrcb)
+        Y_ecualizado = cv2.equalizeHist(Y)
+        # Aplicar CLAHE para mejorar el contraste
+        clahe = cv2.createCLAHE(clipLimit=2.25, tileGridSize=(8, 8))
+        Y_clahe = clahe.apply(Y_ecualizado)
+        imagen_contrastada = cv2.merge([Y_clahe, Cr, Cb])
+        imagen_final = cv2.cvtColor(imagen_contrastada, cv2.COLOR_YCrCb2BGR)
 
-    # Recortar la imagen con el bounding box ajustado
-    cropped_img = img.crop((x1, y1, x2, y2))
+        # Convertir la imagen a escala de grises
+        imagen_gris = cv2.cvtColor(imagen_final, cv2.COLOR_BGR2GRAY)
+        processed_images.append(imagen_gris)  # Agregar imagen procesada a la lista
 
-    # Convertir la imagen recortada a escala de grises
-    cropped_img_gray = cropped_img.convert("L")
+    # Devolver las imágenes procesadas para usar en la función evaluar_pupila
+    return processed_images
 
-    # Mostrar la imagen recortada en escala de grises
-    plt.imshow(cropped_img_gray, cmap='gray')
-    plt.title("Pupila Detectada")
-    plt.axis("off")
-    plt.show()
+def extraer_centros(results):
+    """
+    Extrae los centros de las bounding boxes detectadas.
 
-    return cropped_img_gray, cropped_img
+    Parámetros:
+        results: Resultado de la inferencia de YOLOv5.
+
+    Retorna:
+        Lista de tuplas con coordenadas (cx, cy) de los centros de cada bounding box detectada.
+    """
+    detections = results.xyxy[0].cpu().numpy()  # Convertir detecciones a numpy array
+    centros = []
+
+    for x1, y1, x2, y2, conf, cls in detections:
+        cx = (x1 + x2) / 2  # Calcular centro X
+        cy = (y1 + y2) / 2  # Calcular centro Y
+        centros.append((cx, cy))
+
+    return centros
 
 def dibujar_diferencia(img, resultado, class_colors, scale_factor=4):
     draw = ImageDraw.Draw(img)
@@ -368,6 +395,114 @@ def dibujar_diferencia(img, resultado, class_colors, scale_factor=4):
     plt.axis("off")
     plt.show()
 
+
+def calcular_distancia_y_angulo(centros):
+    """
+    Calcula la distancia y el ángulo entre los dos primeros centros detectados.
+
+    Parámetros:
+        centros: Lista de tuplas (cx, cy) representando los centros detectados.
+
+    Retorna:
+        (ángulo, distancia): Tupla con el ángulo en grados y la distancia euclidiana.
+    """
+    if len(centros) < 2:
+        return None, None  # No hay suficientes puntos para calcular
+
+    # Extraer los primeros dos puntos
+    (x1, y1), (x2, y2) = centros[:2]
+
+    # Calcular diferencia de coordenadas
+    dx, dy = x2 - x1, y2 - y1
+
+    # Calcular ángulo en grados (atan2 da el ángulo en radianes, lo convertimos a grados)
+    angulo = math.degrees(math.atan2(dy, dx))
+    # Calcular distancia euclidiana
+    distancia = math.sqrt(dx**2 + dy**2)
+
+    return round(angulo, 2), round(distancia, 2)
+
+def mostrar_resultados(processed_images, lista_centros):
+    """
+    Muestra las imágenes procesadas con los centros detectados y los valores calculados en una ventana Tkinter.
+
+    Parámetros:
+        processed_images: Lista de imágenes en formato OpenCV (NumPy array).
+        lista_centros: Lista de listas, donde cada elemento contiene los centros (cx, cy) 
+                       de las bounding boxes detectadas en la imagen correspondiente.
+    """
+    # Crear ventana principal si no existe
+    if not tk._default_root:
+        root = tk.Tk()
+        root.withdraw()
+
+    # Crear una ventana secundaria
+    top = tk.Toplevel()
+    top.title("Pupilas Procesadas")
+
+    img_refs = []  # Lista para almacenar referencias de imágenes
+
+    for i, (img, centros) in enumerate(zip(processed_images, lista_centros)):
+        # Convertir la imagen a color para dibujar
+        img_colored = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+
+        # Dibujar los puntos detectados
+        for (cx, cy) in centros:
+            cv2.circle(img_colored, (round(cx), round(cy)), radius=2, color=(0, 0, 255), thickness=-1)  # Rojo
+
+        # Dibujar línea si hay al menos dos centros
+        if len(centros) >= 2:
+            cv2.line(img_colored, 
+                     (round(centros[0][0]), round(centros[0][1])), 
+                     (round(centros[1][0]), round(centros[1][1])), 
+                     (255, 255, 0), 2)  # Azul
+
+        # Calcular ángulo y distancia (si hay al menos 2 centros)
+        angulo, distancia = calcular_distancia_y_angulo(centros)
+
+        # Convertir imagen para Tkinter
+        img_pil = Image.fromarray(cv2.cvtColor(img_colored, cv2.COLOR_BGR2RGB))
+        img_tk = ImageTk.PhotoImage(img_pil)
+        img_refs.append(img_tk)
+
+        # Mostrar imagen en la ventana
+        frame = tk.Frame(top)
+        frame.grid(row=0, column=i, padx=10, pady=10)
+
+        label_img = tk.Label(frame, image=img_tk)
+        label_img.pack()
+
+        # Mostrar ángulo y distancia debajo de la imagen
+        if angulo is not None and distancia is not None:
+            label_text = f"Ángulo: {angulo:.2f}°\nDistancia: {distancia:.2f} px"
+        else:
+            label_text = "No hay suficientes puntos"
+
+        label_info = tk.Label(frame, text=label_text, font=("Arial", 10))
+        label_info.pack()
+
+        # Crear un canvas para dibujar la flecha representando el ángulo
+        if angulo is not None:
+            canvas = tk.Canvas(frame, width=100, height=50)
+            canvas.pack()
+
+            # Calcular coordenadas de la flecha
+            angle_radians = math.radians(angulo)
+            arrow_length = 30  
+
+            start_x, start_y = 50, 40  
+            end_x = start_x + arrow_length * math.cos(angle_radians)
+            end_y = start_y + arrow_length * math.sin(angle_radians)
+
+            canvas.create_line(start_x, start_y, end_x, end_y, arrow=tk.LAST, width=2)
+
+    # Botón para cerrar
+    button_quit = ttk.Button(top, text="Cerrar", command=top.destroy)
+    button_quit.grid(row=1, column=0, columnspan=len(processed_images), pady=10)
+
+    top.protocol("WM_DELETE_WINDOW", top.destroy)  
+    top.wait_window()
+
 class_colors = {
     0: "red",
     1: "blue",
@@ -375,45 +510,38 @@ class_colors = {
     3: "yellow",
     4: "purple"
 }
-"""
-img_path = '/home/flakis/Desktop/EDSSAI/test/capture.jpg' 
 
-img = cargar_img(img_path)"""
+
 frame_list=[]
 #
+def dummy_capture_video(frame_list):
+    """
+    Función dummy que simula la captura de video cargando 9 veces la misma imagen.
+    
+    Parámetros:
+        frame_list (list): Lista donde se almacenarán las imágenes cargadas.
+    """
+    path = "zNwoKg0f.jpg"  # Cambia esto a la ruta de tu imagen local
+
+    try:
+        img = Image.open(path)
+        for _ in range(9):
+            frame_list.append(img.copy())  # Usar copy para evitar referencias compartidas
+        print("Carga dummy completada: 9 imágenes añadidas.")
+    except Exception as e:
+        print(f"Error al cargar la imagen: {e}")
 
 capture_video(frame_list)#Captura de video
 result_list=[]
 for frame in frame_list:
     resultado_1er_Modelo = evaluar_rostro(frame)
     cropped_image=extraer_bounding_boxes(resultado_1er_Modelo,frame)
-    mostrar_imagen_recortada(cropped_image)
+    #mostrar_imagen_recortada(cropped_image)
+
+    # Proceso del segundo model
+    processed_images = procesar_pupilas(cropped_image)
+    resultado_2do_Modelo = [evaluar_pupila(processed_images[1]), evaluar_pupila(processed_images[0])]
+    centros_detectados = [extraer_centros(resultado_2do_Modelo[0]), extraer_centros(resultado_2do_Modelo[1])]
+    mostrar_resultados([processed_images[1], processed_images[0]], centros_detectados)
 
 
-"""
-for frame in frame_list:
-    face_eval=evaluar_rostro(frame)
-    pupila, pupila_color = procesar_pupilas(resultado_1er_Modelo, img)
-    resultado_2do_Modelo = evaluar_pupila(pupila)
-    result_list.append(deepcopy(resultado_2do_Modelo))
-    dibujar diferencias en un plot
-
-
-"""
-"""
-resultado_1er_Modelo = evaluar_rostro(img)
-
-cropped_images = extraer_bounding_boxes(resultado_1er_Modelo, img)
-graficar_seno_tkinter()
-
-# Llamada a la función para mostrar la imagen recortada
-mostrar_imagen_recortada(cropped_images) 
-"""
-"""
-plotear_ojos(cropped_images)
-
-pupila, pupila_color = procesar_pupilas(resultado_1er_Modelo, img)
-resultado_2do_Modelo = evaluar_pupila(pupila)
-
-dibujar_diferencia(pupila_color, resultado_2do_Modelo, class_colors)
-"""
