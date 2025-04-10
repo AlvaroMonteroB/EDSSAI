@@ -72,9 +72,9 @@ def cargar_img(path):
 
 def cargar_modelo(modo):
     if modo == "Face":
-        model = torch.hub.load('ultralytics/yolov5', 'custom', path='best_FaceV2.pt', force_reload=False)
+        model = torch.hub.load('ultralytics/yolov5', 'custom', path='/home/flakis/Desktop/EDSSAI/models/best_FaceV2.pt', force_reload=False)
     else:
-        model = torch.hub.load('ultralytics/yolov5', 'custom', path='EDSSAI150.pt', force_reload=False)
+        model = torch.hub.load('ultralytics/yolov5', 'custom', path='/home/flakis/Desktop/EDSSAI/models/EDSSAI150.pt', force_reload=False)
     return model
 
 def evaluar_rostro(img):
