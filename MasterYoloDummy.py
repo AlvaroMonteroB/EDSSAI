@@ -12,9 +12,10 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from tkinter import ttk
 import subprocess
 import cv2
-import RPi.GPIO as GPIO
 import time
 import math
+import copy
+import RPi.GPIO as GPIO
 
 # Para solucionar problemas de compatibilidad entre sistemas operativos
 #temp = pathlib.PosixPath
@@ -67,9 +68,9 @@ def cargar_img(path):
 
 def cargar_modelo(modo):
     if modo == "Face":
-        model = torch.hub.load('ultralytics/yolov5', 'custom', path='/home/flakis/Desktop/EDSSAI/models/best_FaceV2.pt', force_reload=False)
+        model = torch.hub.load('ultralytics/yolov5', 'custom', path='models/best_FaceV2.pt', force_reload=False)
     else:
-        model = torch.hub.load('ultralytics/yolov5', 'custom', path='/home/flakis/Desktop/EDSSAI/models/EDSSAI150.pt', force_reload=False)
+        model = torch.hub.load('ultralytics/yolov5', 'custom', path='models/EDSSAI150.pt', force_reload=False)
     return model
 
 def evaluar_rostro(img):
@@ -86,46 +87,176 @@ def evaluar_rostro(img):
 def evaluar_pupila(img):
     modo = "Pupil"
     model = cargar_modelo(modo)
-    # Configurar el modelo para correr en CPU o GPU (si está disponible)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
     model.eval()
-    # Realizar la inferencia
-    results = model(img)
-   
-    detections = results.xyxy[0].cpu().numpy()  # Convertir a numpy array
-    print("Bounding boxes detectadas:")
 
-    for i, (x1, y1, x2, y2, conf, cls) in enumerate(detections):
-        print(f"Detección {i + 1}:")
-        print(f"  - Esquina superior izquierda: ({x1:.2f}, {y1:.2f})")
-        print(f"  - Esquina inferior derecha: ({x2:.2f}, {y2:.2f})")
-        print(f"  - Confianza: {conf:.2f}")
-        print(f"  - Clase: {int(cls)}")
-    return results
+    # img = img.to(device) # Asegurar que img esté en el device
+
+    # Realizar la inferencia
+    with torch.no_grad():
+        results = model(img) # Objeto original de resultados
+
+    # --- Crear copia profunda para modificar ---
+    results_aux = copy.deepcopy(results)
+    print("\nTipo de results_aux:", type(results_aux))
+
+    # --- Seleccionar las Top 2 detecciones por confianza ---
+    top_n = 2 # Queremos las 2 mejores
+    try:
+        # Acceder a las detecciones del results ORIGINAL (no de la copia aún)
+        # para obtener todas las detecciones antes de seleccionar
+        if hasattr(results, 'xyxy') and results.xyxy and len(results.xyxy[0]) > 0:
+            detections_np = results.xyxy[0].cpu().numpy() # Obtener como NumPy array [N, 6]
+            num_original = detections_np.shape[0]
+            print(f"Número original de detecciones: {num_original}")
+
+            if num_original > 0:
+                # Ordenar el array NumPy por la columna de confianza (índice 4) en orden DESCENDENTE
+                # argsort devuelve los índices que ordenarían el array
+                # [::-1] invierte el orden para que sea descendente (mayor confianza primero)
+                sorted_indices = np.argsort(detections_np[:, 4])[::-1]
+
+                # Seleccionar los índices de las top N detecciones
+                # El slicing [:top_n] maneja automáticamente si hay menos de N detecciones
+                top_n_indices = sorted_indices[:top_n]
+
+                # Usar los índices para obtener las filas correspondientes del array original
+                top_n_detections_np = detections_np[top_n_indices]
+                print(f"Seleccionadas las Top {len(top_n_detections_np)} detecciones por confianza.")
+
+                # Convertir el array NumPy de las top N de vuelta a un tensor de PyTorch
+                top_n_detections_tensor = torch.from_numpy(top_n_detections_np).to(device)
+
+                # *** Reemplazar el tensor en la COPIA results_aux con el tensor Top N ***
+                results_aux.xyxy[0] = top_n_detections_tensor
+
+            else:
+                # Si no hubo detecciones originales, asegurarse que el tensor en results_aux esté vacío
+                print("No había detecciones originales.")
+                # (La copia profunda ya debería tener un tensor vacío si results.xyxy[0] estaba vacío)
+                results_aux.xyxy[0] = torch.empty((0, 6), device=device) # Asegurar forma correcta si es posible
+
+        else:
+            print("No se encontraron detecciones en results.xyxy[0].")
+            # Asegurar que results_aux también refleje esto
+            if hasattr(results_aux, 'xyxy') and isinstance(results_aux.xyxy, list):
+                 results_aux.xyxy[0] = torch.empty((0, 6), device=device) # Tensor vacío
+
+    except AttributeError:
+        print("Error: El objeto 'results' no tiene el atributo '.xyxy' esperado.")
+    except IndexError:
+        print("Error: No se pudo acceder a results.xyxy[0]. ¿La lista está vacía?")
+    except Exception as e:
+        print(f"Ocurrió un error inesperado durante la selección Top N: {e}")
+        import traceback
+        traceback.print_exc() # Útil para depurar
+
+    # --- Imprimir las detecciones Top N que quedaron en results_aux ---
+    print(f"\nDetecciones Top {top_n} restantes en results_aux (después de la selección):")
+    try:
+        if hasattr(results_aux, 'xyxy') and results_aux.xyxy:
+            # Acceder al tensor DENTRO de results_aux (que ya debe contener solo las top N)
+            final_detections_np = results_aux.xyxy[0].cpu().numpy()
+            if len(final_detections_np) > 0:
+                # Ordenar por confianza para imprimir (opcional, ya deberían estar ordenadas)
+                final_detections_np = final_detections_np[np.argsort(final_detections_np[:, 4])[::-1]]
+                for i, (x1, y1, x2, y2, conf, cls) in enumerate(final_detections_np):
+                    print(f"  Detección {i + 1} (Top {len(final_detections_np)}):")
+                    print(f"    - Coords: ({x1:.2f}, {y1:.2f}) to ({x2:.2f}, {y2:.2f})")
+                    print(f"    - Confianza: {conf:.2f}") # Esta debería ser alta
+                    print(f"    - Clase: {int(cls)}")
+            else:
+                print("  No quedaron detecciones después de la selección (o no había originales).")
+        else:
+             print("  El atributo .xyxy no existe o está vacío en results_aux.")
+    except Exception as e:
+        print(f"Error imprimiendo detecciones finales: {e}")
+
+    # Retornar la COPIA MODIFICADA que ahora contiene solo las Top N detecciones
+    return results_aux
 
 def extraer_bounding_boxes(results, img):
+    """
+    Extrae las regiones de interés (bounding boxes) de una imagen NumPy.
+
+    Args:
+        results: Objeto de resultados del modelo YOLOv5.
+        img (np.ndarray): Imagen de entrada en formato NumPy array (se asume BGR).
+
+    Returns:
+        list: Lista de imágenes recortadas (NumPy arrays).
+              Contiene las detecciones 1ra y 3ra si hay 3+, las 2 si hay 2,
+              la única si hay 1, o vacía si no hay.
+              ¡ESTA LÓGICA DE SELECCIÓN PUEDE NECESITAR REVISIÓN!
+    """
+    # Verificar tipo de imagen de entrada
+    if not isinstance(img, np.ndarray):
+        # Podrías intentar convertir desde PIL aquí si fuera necesario
+        print(f"[ERROR] extraer_bounding_boxes: La imagen de entrada no es un NumPy array (tipo: {type(img)})")
+        return []
+
     # Extraer bounding boxes
-    detections = results.xyxy[0].cpu().numpy()  # Convertir a numpy array
-    print("Bounding boxes detectadas:")
-    cropped_images = []
+    try:
+        # results.xyxy[0] contiene las detecciones [x1, y1, x2, y2, conf, cls] para la imagen 0
+        detections = results.xyxy[0].cpu().numpy()
+    except Exception as e:
+        print(f"[ERROR] extraer_bounding_boxes: No se pudieron extraer detecciones de 'results'. Error: {e}")
+        return []
 
-    for i, (x1, y1, x2, y2, conf, cls) in enumerate(detections):
-        print(f"Detección {i + 1}:")
-        print(f"  - Esquina superior izquierda: ({x1:.2f}, {y1:.2f})")
-        print(f"  - Esquina inferior derecha: ({x2:.2f}, {y2:.2f})")
-        print(f"  - Confianza: {conf:.2f}")
-        print(f"  - Clase: {int(cls)}")
+    print(f"[DEBUG] extraer_bounding_boxes: {len(detections)} detecciones encontradas.")
+    cropped_items = []
+    img_height, img_width = img.shape[:2] # Dimensiones para clipping
 
-        # Recortar la imagen usando las coordenadas de la bounding box
-        cropped_img = img.crop((x1, y1, x2, y2))
-        cropped_images.append(cropped_img)
+    for i, detection_data in enumerate(detections):
+        if len(detection_data) < 6:
+             print(f"  - Advertencia: Detección {i+1} tiene formato inesperado. Saltando.")
+             continue
+        x1, y1, x2, y2, conf, cls = detection_data
 
-    # Si 3+ imágenes, solo conservar la primera y la última
-    if len(cropped_images) > 2:
-        cropped_images = [cropped_images[0], cropped_images[2]]
+        print(f"[DEBUG] Detección {i+1}: Box [{x1:.1f}, {y1:.1f}, {x2:.1f}, {y2:.1f}], Conf: {conf:.2f}, Cls: {int(cls)}")
 
-    return cropped_images
+        # Convertir a enteros y asegurar límites (Clipping)
+        x1_int, y1_int = max(0, int(x1)), max(0, int(y1))
+        x2_int, y2_int = min(img_width, int(x2)), min(img_height, int(y2))
+
+        # Validar coordenadas
+        if x1_int >= x2_int or y1_int >= y2_int:
+            print(f"  - Advertencia: Coordenadas inválidas tras clipping para detección {i+1}. Saltando.")
+            continue
+
+        # Recortar usando NumPy slicing
+        try:
+            cropped_img_np = img[y1_int:y2_int, x1_int:x2_int]
+            if cropped_img_np.size == 0:
+                print(f"  - Advertencia: Recorte vacío para detección {i+1}. Saltando.")
+                continue
+            cropped_items.append(cropped_img_np) # Añadir el array NumPy recortado
+            print(f"  - Recorte {i+1} añadido, shape: {cropped_img_np.shape}")
+        except Exception as e:
+            print(f"  - ERROR al recortar detección {i+1} con coords [{y1_int}:{y2_int}, {x1_int}:{x2_int}]: {e}")
+
+
+    # --- Lógica de selección (1ra y 3ra si hay 3+) ---
+    # ¡¡¡REVISA ESTA LÓGICA!!! Puede que no sea lo que necesitas para seleccionar ojos.
+    # Podrías necesitar filtrar por clase (cls) o confianza (conf) antes.
+    final_cropped_images = []
+    num_detected = len(cropped_items)
+    if num_detected >= 3:
+        print(f"[WARN] Se detectaron {num_detected} objetos. Conservando solo el 1ro y 3ro (según lógica original). ¡REVISAR!")
+        final_cropped_images = [cropped_items[0], cropped_items[2]]
+    elif num_detected == 2:
+        print("[DEBUG] Se detectaron 2 objetos. Conservando ambos.")
+        final_cropped_images = cropped_items
+    elif num_detected == 1:
+        print("[WARN] Solo se detectó 1 objeto.")
+        final_cropped_images = cropped_items # Devuelve lista con 1 elemento
+    else:
+        print("[WARN] No se detectaron objetos válidos o no se pudieron recortar.")
+        final_cropped_images = [] # Lista vacía
+
+    print(f"[DEBUG] extraer_bounding_boxes: Devolviendo {len(final_cropped_images)} imágenes recortadas.")
+    return final_cropped_images
 
 def capture_video(frame_list):
     VIDEO_PIPE = "libcamera-vid -t 0 --inline --flush --width 640 --height 480 --framerate 30 --codec mjpeg -o -"
@@ -138,15 +269,15 @@ def capture_video(frame_list):
 
     LED_PINS = [17, 27, 22, 5, 6, 13, 19, 26, 21]  # Ajusta estos pines según tu conexión física
 
-    GPIO.setmode(GPIO.BCM)  # Usar numeración BCM
-    GPIO.setup(LED_PINS, GPIO.OUT)
+    #GPIO.setmode(GPIO.BCM)  # Usar numeración BCM
+    #GPIO.setup(LED_PINS, GPIO.OUT)
 
     # Apagar todos los LEDs al inicio
-    for pin in LED_PINS:
-        GPIO.output(pin, GPIO.LOW)
+    #for pin in LED_PINS:
+    #    GPIO.output(pin, GPIO.LOW)
     
     
-    GPIO.output(LED_PINS[0], GPIO.HIGH)
+    #GPIO.output(LED_PINS[0], GPIO.HIGH)
     led_index = 0
     while True:
         # Leer los datos del flujo MJPEG en pequeños fragmentos
@@ -168,17 +299,71 @@ def capture_video(frame_list):
         if key != 255:  # Cualquier tecla presionada
             if key == ord('q'):
                 break
-            GPIO.output(LED_PINS[led_index], GPIO.LOW)
+            #GPIO.output(LED_PINS[led_index], GPIO.LOW)
             time.sleep(0.1)  # Pequeño retraso antes de capturar la imagen
             frame_list.append(Image.fromarray(frame))
             led_index += 1
-            if led_index < len(LED_PINS):
-                GPIO.output(LED_PINS[led_index], GPIO.HIGH)
+            #if led_index < len(LED_PINS):
+            #    GPIO.output(LED_PINS[led_index], GPIO.HIGH)
                 
         if len(frame_list)==9:
             break
     cap_process.terminate()
     cv2.destroyAllWindows()
+
+def capture_video(frame_list, led_index):
+    VIDEO_PIPE = "libcamera-vid -t 0 --inline --flush --width 640 --height 480 --framerate 30 --codec mjpeg -o -"
+    cap_process = subprocess.Popen(VIDEO_PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
+
+    print("Presiona cualquier tecla para tomar una foto. Presiona 'q' para salir.")
+
+    buffer = bytearray()
+
+    # Definir pines GPIO de los LEDs
+    LED_PINS = [17, 27, 22, 5, 6, 13, 19, 26, 21]
+
+    GPIO.setmode(GPIO.BCM)
+    GPIO.setup(LED_PINS, GPIO.OUT)
+
+    # Apagar todos los LEDs primero
+    for pin in LED_PINS:
+        GPIO.output(pin, GPIO.LOW)
+
+    # Encender solo el LED indicado por parámetro
+    if 0 <= led_index < len(LED_PINS):
+        GPIO.output(LED_PINS[led_index], GPIO.HIGH)
+
+    try:
+        while True:
+            buffer.extend(cap_process.stdout.read(4096))
+            start = buffer.find(b'\xff\xd8')  # JPEG start
+            end = buffer.find(b'\xff\xd9')    # JPEG end
+
+            if start != -1 and end != -1 and start < end:
+                jpg_data = buffer[start:end+2]
+                buffer = buffer[end+2:]
+
+                frame = cv2.imdecode(np.frombuffer(jpg_data, dtype=np.uint8), cv2.IMREAD_COLOR)
+
+                if frame is not None:
+                    cv2.imshow("Raspberry Pi Camera", frame)
+
+            key = cv2.waitKey(1) & 0xFF
+            if key != 255:
+                if key == ord('q'):
+                    break
+                time.sleep(0.1)
+                frame_list.append(Image.fromarray(frame))
+                break  # Solo una captura por llamada
+
+    finally:
+        # Apagar el LED correspondiente al finalizar
+        if 0 <= led_index < len(LED_PINS):
+            GPIO.output(LED_PINS[led_index], GPIO.LOW)
+
+        cap_process.terminate()
+        cv2.destroyAllWindows()
+        GPIO.cleanup()
 
 # Función para graficar el seno dentro de una ventana de tkinter
 def graficar_seno_tkinter():
@@ -292,9 +477,6 @@ def mostrar_imagen_recortada(cropped_images):
     print("La ventana se ha cerrado, el flujo continúa.")
 
  
-
-
-
 def procesar_pupilas(cropped_images):
     if not cropped_images:
         print("No se detectaron pupilas.")
@@ -504,9 +686,14 @@ class_colors = {
     4: "purple"
 }
 
+def main():
+    pass
+
+if "__init__" == "__main__":
+    main()
 
 frame_list=[]
-#
+
 def dummy_capture_video(frame_list):
     """
     Función dummy que simula la captura de video cargando 9 veces la misma imagen.
@@ -514,6 +701,7 @@ def dummy_capture_video(frame_list):
     Parámetros:
         frame_list (list): Lista donde se almacenarán las imágenes cargadas.
     """
+
     path = "zNwoKg0f.jpg"  # Cambia esto a la ruta de tu imagen local
 
     try:
@@ -524,7 +712,7 @@ def dummy_capture_video(frame_list):
     except Exception as e:
         print(f"Error al cargar la imagen: {e}")
 
-capture_video(frame_list)#Captura de video
+#dummy_capture_video(frame_list)#Captura de video
 result_list=[]
 for frame in frame_list:
     resultado_1er_Modelo = evaluar_rostro(frame)
